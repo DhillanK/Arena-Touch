@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0b0c10">
+<title>Arena Touch</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <div class="brand">
+      <span id="status" class="dot" title="Connection"></span>
+      <span id="compName">Connecting…</span>
+    </div>
+    <div id="tempo" class="tempo">
+      <button data-tempo="half" class="btn sm">/2</button>
+      <button data-tempo="down" class="btn sm">−</button>
+      <div class="bpm" id="bpmBox" title="BPM — dots show the beat within the bar"><span id="bpm">--</span><div class="beats" id="beats"><i></i><i></i><i></i><i></i></div></div>
+      <button data-tempo="up" class="btn sm">+</button>
+      <button data-tempo="double" class="btn sm">×2</button>
+      <button data-tempo="tap" class="btn tap">TAP</button>
+      <button data-tempo="resync" class="btn">SYNC</button>
+    </div>
+    <div class="tools">
+      <button id="zoomOut" class="btn sm" title="Smaller tiles">−</button>
+      <button id="zoomIn" class="btn sm" title="Bigger tiles">+</button>
+      <button id="lock" class="btn" title="Lock the clip grid">Lock</button>
+      <button id="fullscreen" class="btn sm" title="Fullscreen">⤢</button>
+    </div>
+  </header>
+
+  <nav id="decks" class="decks" aria-label="Decks"></nav>
+
+  <main id="main">
+    <section id="clipsView" class="view">
+      <div id="grid" class="grid"></div>
+    </section>
+    <aside id="side" class="side">
+      <div class="sidetabs" role="tablist">
+        <button data-panel="mixer" class="tab">Mixer</button>
+        <button data-panel="fx" class="tab">Effects</button>
+      </div>
+      <section id="mixerView" class="view panel"></section>
+      <section id="fxView" class="view panel"></section>
+    </aside>
+  </main>
+
+  <nav id="bottomNav" class="bottomnav">
+    <button data-view="clips" class="tab">Clips</button>
+    <button data-view="mixer" class="tab">Mixer</button>
+    <button data-view="fx" class="tab">Effects</button>
+  </nav>
+
+  <div id="banner" class="banner">Waiting for Resolume…</div>
+</div>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

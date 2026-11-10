@@ -5,6 +5,10 @@
  * Use null for "no colour" (number 1 is Resolume's default / unlabelled).
  */
 window.ARENA_TOUCH_CONFIG = {
+  // Columns shown per page in the clip grid (0 = all). Each device can change this from the
+  // selector above the grid; this is just the starting value. 8 matches an APC Mini.
+  columnsPerPage: 8,
+
   colours: {
     '1': null,
     '2': '#ff4d5e', // red

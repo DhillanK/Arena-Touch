@@ -104,19 +104,46 @@ async def relay(reader, writer, request_line, headers, target):
     await asyncio.gather(pipe(reader, up_writer), pipe(up_reader, writer))
 
 
-async def serve_static(writer, path, method):
+EXTRA_TYPES = {".webm": "video/webm", ".mp4": "video/mp4", ".js": "text/javascript", ".css": "text/css"}
+
+
+async def serve_static(writer, path, method, headers=()):
     rel = path.split("?", 1)[0].lstrip("/") or "index.html"
     file = (WEB_ROOT / rel).resolve()
     if WEB_ROOT not in file.parents or not file.is_file():
         file = None
+    status = "200 OK"
+    extra = ""
     if file is None:
         body = b"Not found"
-        head = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n"
+        status = "404 Not Found"
+        ctype = "text/plain"
     else:
         body = file.read_bytes()
-        ctype = mimetypes.guess_type(str(file))[0] or "application/octet-stream"
-        head = f"HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nCache-Control: no-cache\r\n"
-    head += f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n"
+        ctype = EXTRA_TYPES.get(file.suffix.lower()) or mimetypes.guess_type(str(file))[0] or "application/octet-stream"
+        extra = "Accept-Ranges: bytes\r\n"
+        # Range requests: iOS Safari won't play a video unless the server honours them.
+        rng = next((v for n, v in headers if n.lower() == "range"), "")
+        if rng.startswith("bytes="):
+            start_s, _, end_s = rng[6:].split(",")[0].partition("-")
+            try:
+                size = len(body)
+                if start_s:
+                    start = int(start_s)
+                    end = min(int(end_s), size - 1) if end_s else size - 1
+                else:  # suffix range: last N bytes
+                    start, end = max(0, size - int(end_s)), size - 1
+                if start > end or start >= size:
+                    raise ValueError
+                body = body[start:end + 1]
+                status = "206 Partial Content"
+                extra += f"Content-Range: bytes {start}-{end}/{size}\r\n"
+            except ValueError:
+                status = "416 Range Not Satisfiable"
+                extra = f"Content-Range: bytes */{len(body)}\r\n"
+                body = b""
+    head = (f"HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nCache-Control: no-cache\r\n{extra}"
+            f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n")
     writer.write(head.encode() + (b"" if method == "HEAD" else body))
     await writer.drain()
     writer.close()
@@ -137,7 +164,7 @@ def make_handler(target):
         if path.startswith("/api/"):
             await relay(reader, writer, request_line, headers, target)
         else:
-            await serve_static(writer, path, method)
+            await serve_static(writer, path, method, headers)
     return handle
 
 

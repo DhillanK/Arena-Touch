@@ -12,6 +12,8 @@ Arena Touch talks directly to Resolume's built-in REST and WebSocket API, so it 
 
 - **Decks:** tap to switch, and the grid rebuilds from the new deck.
 - **Clip grid:** real thumbnails and live state (green means playing, amber means previewing). Arena colour labels show as a stripe on each clip, and playing clips show a progress bar for their loop. Column triggers, per-layer bypass, solo and clear, plus Clear all. **Lock** stops accidental triggers, and tile size is adjustable.
+- **Column pages:** show 4, 6, 8, 10, 12 or 16 columns at a time (8 by default, matching an APC Mini) or all of them, with page arrows and dots. This makes big decks usable on a phone.
+- **Clip panel:** follows the selected clip, whether you selected it in Arena or it's the last clip triggered from the app. It has scrub position (with time), speed, direction, play mode, opacity, blend mode, resize, transport type, trigger style, beat snap, and the clip's own effects. Selected clips show an amber dot in the grid.
 - **Mixer:** composition master, A/B crossfader (double-tap to centre), and a strip for each layer and group: master fader, bypass, solo, crossfader A/B assignment, blend mode and clear. Faders move relative to your finger, so they never jump when touched.
 - **Effects:** every video effect on the composition, a group or a layer, each with an on/off toggle and all of its parameters (sliders, toggles, dropdowns, colours, hold buttons and steppers).
 - **Blackout:** one tap takes every layer, group and the composition to 0, so the wall goes black even when Advanced Output slices take their input from groups or layers. Clips keep playing. Tap **Restore** to bring back the exact levels. Every connected device shows the blackout.
@@ -19,6 +21,7 @@ Arena Touch talks directly to Resolume's built-in REST and WebSocket API, so it 
 - **Tempo:** live BPM with a beat pulse and a four-dot bar counter, plus TAP, SYNC, ±1, /2 and ×2.
 - **Multi-device:** connect as many phones and tablets as you like. Everything stays in sync both ways, including with Arena and your MIDI controller.
 - **Responsive:** a side-by-side layout on tablets, and bottom tabs on phones.
+- **Stays awake:** the phone or tablet screen won't sleep while the app is open, even over plain `http://` on your LAN. Browsers refuse the Wake Lock API there, so it falls back to a tiny silent looping video.
 
 <p align="center"><img src="docs/phone-mixer.png" width="300" alt="Arena Touch mixer on a phone"></p>
 
@@ -52,7 +55,7 @@ python3 server.py --port 8000 --resolume 127.0.0.1:8080 --bind 0.0.0.0
 
 ## Configuration
 
-`web/config.js` holds the settings. Resolume's API reports only a colour **number** (1–6) for clips, layers, groups and decks, not the actual colour. The numbers are mapped to colours in that file, so edit the hex values if the colours don't match your Arena setup.
+`web/config.js` holds the settings: the starting number of columns per page, and the colour labels. Resolume's API reports only a colour **number** (1–6) for clips, layers, groups and decks, not the actual colour. The numbers are mapped to colours in that file, so edit the hex values if the colours don't match your Arena setup.
 
 ## How it works
 
@@ -104,10 +107,10 @@ Resolume's API covers the composition only. Outputs, screens, slices and Advance
 
 ## Roadmap
 
-- Clip-level effects and clip transport (speed, scrub)
 - Autopilot controls
 - Hiding layers and columns, and a performance mode (big tiles only)
-- Grid paging to match hardware controllers (e.g. APC Mini)
+- Sync grid pages with an APC Mini page (MIDI)
+- QR code to connect, clip time-remaining countdown, PIN lock
 - Per-slice-source "panel" buttons (e.g. blank the side screens only)
 
 Issues and pull requests are welcome.

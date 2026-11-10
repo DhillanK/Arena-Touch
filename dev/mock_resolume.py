@@ -55,7 +55,18 @@ def make_layers():
             clips.append({"id": cid, "name": prm("ParamString", "" if empty else f"{DECKS[deck_sel]} clip {li+1}.{ci+1}"),
                           "connected": prm("ParamState", "Empty" if empty else "Disconnected", options=STATE),
                           "colorid": choice(["1","2","3","4","5","6"], str(1 + (li * 7 + ci * 3) % 6)),
-                          "transport": {"position": rng(0, 0, 4000 + 1000 * ci)},
+                          "selected": prm("ParamTrigger", False),
+                          "transporttype": choice(["Timeline", "BPM Sync"], "Timeline"),
+                          "triggerstyle": choice(["Composition Determined", "Normal", "Piano", "Toggle"], "Composition Determined"),
+                          "beatsnap": choice(["Composition Determined", "None", "1 Bar"], "Composition Determined"),
+                          "transport": {"position": rng(0, 0, 4000 + 1000 * ci),
+                                        "controls": {"speed": rng(1, 0, 10),
+                                                     "playdirection": choice(["<", "||", ">"], ">"),
+                                                     "playmode": choice(["Loop", "Bounce", "Random", "Play Once & Clear", "Play Once & Hold"], "Loop")}},
+                          "video": {"opacity": rng(1), "mixer": {"Blend Mode": choice(["Layer Determined"] + BLEND, "Layer Determined")},
+                                    "resize": choice(["Fill", "Fit", "Stretch", "Original"], "Fill"),
+                                    "fileinfo": {"duration_ms": 4000 + 1000 * ci},
+                                    "effects": [fx("Hue Rotate")] if ci % 2 == 0 else []},
                           "thumbnail": {"id": cid, "is_default": empty, "last_update": "1", "path": ""}})
         layers.append({"id": 500 + li, "name": prm("ParamString", "Layer #" if li < 3 else "Content"),
                        "bypassed": prm("ParamBoolean", False), "solo": prm("ParamBoolean", False),
@@ -123,6 +134,13 @@ async def handler(ws):
                 parts = path.strip("/").split("/")
                 if parts[1] == "clips" and parts[-1] == "connect" and m.get("value") is True:
                     await connect_clip(int(parts[3]))
+                elif parts[1] == "clips" and parts[-1] == "select":
+                    cid = int(parts[3])
+                    for l in LAYERS:
+                        for c in l["clips"]:
+                            want = c["id"] == cid
+                            if c["selected"]["value"] != want:
+                                c["selected"]["value"] = want; await upd(c["selected"])
                 elif parts[1] == "columns" and parts[-1] == "connect" and m.get("value") is True:
                     ci = int(parts[3]) - 700
                     for l in LAYERS: await connect_clip(l["clips"][ci]["id"])

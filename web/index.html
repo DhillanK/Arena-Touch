@@ -39,15 +39,18 @@
 
   <main id="main">
     <section id="clipsView" class="view">
+      <div id="pager" class="pager"></div>
       <div id="grid" class="grid"></div>
     </section>
     <aside id="side" class="side">
       <div class="sidetabs" role="tablist">
         <button data-panel="mixer" class="tab">Mixer</button>
         <button data-panel="fx" class="tab">Effects</button>
+        <button data-panel="clip" class="tab">Clip</button>
       </div>
       <section id="mixerView" class="view panel"></section>
       <section id="fxView" class="view panel"></section>
+      <section id="clipView" class="view panel"></section>
     </aside>
   </main>
 
@@ -55,6 +58,7 @@
     <button data-view="clips" class="tab">Clips</button>
     <button data-view="mixer" class="tab">Mixer</button>
     <button data-view="fx" class="tab">Effects</button>
+    <button data-view="clip" class="tab">Clip</button>
   </nav>
 
   <div id="banner" class="banner">Waiting for Resolume…</div>

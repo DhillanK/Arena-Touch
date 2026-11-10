@@ -46,7 +46,10 @@
   const S = {
     ws: null, open: false, comp: null, compAt: 0,
     params: new Map(),          // id -> param object (value, options, min, max…)
-    binds: { top: new Map(), grid: new Map(), mixer: new Map(), fx: new Map(), pos: new Map() },
+    binds: { top: new Map(), grid: new Map(), mixer: new Map(), fx: new Map(), pos: new Map(), clip: new Map(), sel: new Map() },
+    selClip: null,
+    colsPerPage: store.get('colsPerPage', (window.ARENA_TOUCH_CONFIG || {}).columnsPerPage ?? 8),
+    colPage: 0,
     subs: new Set(),
     dragging: new Set(),
     view: store.get('view', 'clips'),
@@ -158,7 +161,8 @@
   }
 
   function renderAll() {
-    renderTop(); renderDecks(); renderGrid(); renderMixer(); renderFx(); syncSubs();
+    if (!findClip(S.selClip)) S.selClip = selectedFromComp();
+    renderTop(); renderDecks(); renderGrid(); renderMixer(); renderFx(); renderClip(); watchSelection(); syncSubs();
   }
 
   // ------------------------------------------------------------------ top bar / tempo
@@ -282,6 +286,7 @@
         nav.querySelectorAll('.deck').forEach(x => x.classList.remove('pending'));
         b.classList.add('pending');
         trigger(`/composition/decks/by-id/${d.id}/select`);
+        S.colPage = 0;
         const before = S.compAt;
         clearTimeout(deckTimer);
         deckTimer = setTimeout(() => { if (S.compAt === before) refetchComposition(); }, 1200);
@@ -336,12 +341,44 @@
     syncSubsSoon();
   }
 
+  function renderPager(total, first, count, pages) {
+    const bar = $('#pager'); bar.textContent = '';
+    const prev = h('button', { class: 'btn sm' }, '◀'), next = h('button', { class: 'btn sm' }, '▶');
+    prev.disabled = S.colPage <= 0; next.disabled = S.colPage >= pages - 1;
+    const go = d => { S.colPage += d; renderGrid(); syncSubs(); };
+    prev.addEventListener('click', () => go(-1)); next.addEventListener('click', () => go(1));
+    const sel = h('select', { class: 'pgsel', title: 'Columns per page' });
+    for (const n of [0, 4, 6, 8, 10, 12, 16]) sel.append(h('option', { value: n }, n ? `${n} per page` : 'All columns'));
+    sel.value = String(S.colsPerPage);
+    sel.addEventListener('change', () => {
+      const firstCol = S.colPage * (S.colsPerPage || total);
+      S.colsPerPage = parseInt(sel.value, 10); store.set('colsPerPage', S.colsPerPage);
+      S.colPage = S.colsPerPage ? Math.floor(firstCol / S.colsPerPage) : 0;
+      renderGrid(); syncSubs();
+    });
+    const label = h('span', { class: 'pglabel' }, total ? `Columns ${first + 1}–${first + count} of ${total}` : 'No columns');
+    const dots = h('span', { class: 'pgdots' });
+    if (pages > 1 && pages <= 12) for (let i = 0; i < pages; i++) {
+      const d = h('button', { class: 'pgdot' + (i === S.colPage ? ' on' : ''), title: `Page ${i + 1}` });
+      d.addEventListener('click', () => { S.colPage = i; renderGrid(); syncSubs(); });
+      dots.append(d);
+    }
+    if (pages > 1) bar.append(prev, label, next, dots); else bar.append(label);
+    bar.append(sel);
+  }
+
   function renderGrid() {
     S.binds.grid.clear(); S.binds.pos.clear();
     const grid = $('#grid'); grid.textContent = '';
     const c = S.comp; if (!c) return;
-    const cols = c.columns || [];
-    grid.style.setProperty('--cols', cols.length);
+    const allCols = c.columns || [];
+    const per = S.colsPerPage > 0 ? S.colsPerPage : allCols.length;
+    const pages = Math.max(1, Math.ceil(allCols.length / per));
+    S.colPage = clamp(S.colPage, 0, pages - 1);
+    const first = S.colPage * per;
+    const shown = allCols.map((col, i) => ({ col, i })).slice(first, first + per);
+    renderPager(allCols.length, first, shown.length, pages);
+    grid.style.setProperty('--cols', shown.length);
     document.documentElement.style.setProperty('--tile', S.tile + 'px');
 
     const clearAll = h('button', { class: 'btn' }, 'Clear all');
@@ -354,7 +391,7 @@
     });
     grid.append(h('div', { class: 'corner' }, clearAll));
 
-    cols.forEach((col, i) => {
+    shown.forEach(({ col, i }) => {
       const b = h('button', null, pname(col.name, i + 1, `Column ${i + 1}`));
       holdButton(b,
         () => trigger(`/composition/columns/by-id/${col.id}/connect`, true),
@@ -382,12 +419,12 @@
       bind('grid', l.colorid, () => tint(head, colourOf(l.colorid) || (group && colourOf(group.g.colorid))));
       grid.append(head);
 
-      cols.forEach((_, ci) => {
+      shown.forEach(({ i: ci }) => {
         const clip = l.clips[ci];
         if (!clip) { grid.append(h('div', { class: 'clip empty' })); return; }
         const url = thumbUrl(clip);
         const progFill = h('i');
-        const tile = h('div', { class: 'clip', 'data-id': clip.id },
+        const tile = h('div', { class: 'clip' + (clip.id === S.selClip ? ' sel' : ''), 'data-id': clip.id },
           url ? h('img', { src: url, loading: 'lazy', alt: '', draggable: 'false' }) : null,
           clip.name && clip.name.value ? h('div', { class: 'cname' }, clip.name.value) : null,
           h('div', { class: 'ctag' }),
@@ -403,7 +440,12 @@
           if (pos) watchPosition(pos, progFill, live);
         });
         holdButton(tile,
-          () => { if (!tile.classList.contains('empty')) trigger(`/composition/clips/by-id/${clip.id}/connect`, true); },
+          () => {
+            if (tile.classList.contains('empty')) return;
+            trigger(`/composition/clips/by-id/${clip.id}/connect`, true);
+            trigger(`/composition/clips/by-id/${clip.id}/select`);
+            setSelectedClip(clip.id);
+          },
           () => { if (!tile.classList.contains('empty')) trigger(`/composition/clips/by-id/${clip.id}/connect`, false); });
         grid.append(tile);
       });
@@ -616,7 +658,7 @@
     for (const { layer: l, index } of layersTopDown()) t.push({ key: 'l' + l.id, label: pname(l.name, index, `Layer ${index}`), obj: l });
     return t;
   }
-  function paramControl(name, p) {
+  function paramControl(name, p, group = 'fx') {
     const view = p.view || {};
     const wrap = h('div', { class: 'prm' });
     const label = h('div', { class: 'plabel' }, h('span', null, view.alternative_name || name));
@@ -636,22 +678,22 @@
             const cur = (S.params.get(p.id) || p).value; setParam(p.id, clamp(cur + d, p.min, p.max)); num.textContent = fmt(clamp(cur + d, p.min, p.max)); }); return b; };
           const reset = h('button', { class: 'btn sm' }, '0');
           reset.addEventListener('click', () => { send({ action: 'reset', parameter: byId(p.id) }); });
-          bind('fx', p, q => { num.textContent = fmt(q.value); });
+          bind(group, p, q => { num.textContent = fmt(q.value); });
           wrap.append(h('div', { class: 'inline' }, mk('−10', -10 * step), mk('−', -step), num, mk('+', step), mk('+10', 10 * step), reset));
         } else {
-          wrap.append(fader('fx', p, { format: fmt }));
+          wrap.append(fader(group, p, { format: fmt }));
         }
         break;
       }
       case 'ParamBoolean': {
         const b = h('button', { class: 'btn' }, 'Off');
         b.addEventListener('click', () => setParam(p.id, !(S.params.get(p.id) || p).value));
-        bind('fx', p, q => { b.classList.toggle('on', !!q.value); b.textContent = q.value ? 'On' : 'Off'; });
+        bind(group, p, q => { b.classList.toggle('on', !!q.value); b.textContent = q.value ? 'On' : 'Off'; });
         wrap.append(b);
         break;
       }
       case 'ParamChoice': case 'ParamState':
-        wrap.append(choiceSelect('fx', p));
+        wrap.append(choiceSelect(group, p));
         break;
       case 'ParamEvent': case 'ParamTrigger': {
         const b = h('button', { class: 'btn' }, view.alternative_name || name);
@@ -664,7 +706,7 @@
         const inp = h('input', { type: 'color' });
         let alpha = 'ff';
         inp.addEventListener('input', () => setParam(p.id, inp.value + alpha));
-        bind('fx', p, q => { if (typeof q.value === 'string') { inp.value = q.value.slice(0, 7); alpha = q.value.slice(7, 9) || 'ff'; } });
+        bind(group, p, q => { if (typeof q.value === 'string') { inp.value = q.value.slice(0, 7); alpha = q.value.slice(7, 9) || 'ff'; } });
         wrap.append(inp);
         break;
       }
@@ -673,6 +715,137 @@
     }
     return wrap;
   }
+  function effectCards(container, effects, group) {
+    for (const fx of effects) {
+      const open = S.fxOpen.has(fx.id);
+      const card = h('div', { class: 'fx' + (open ? ' open' : '') });
+      const chev = h('span', { class: 'chev' }, open ? '▾' : '▸');
+      const head = h('div', { class: 'fxhead' }, chev, h('span', { class: 'fxname' }, fx.display_name || fx.name));
+      if (fx.bypassed) {
+        const b = h('button', { class: 'btn sm' }, 'On');
+        b.addEventListener('click', e => { e.stopPropagation(); setParam(fx.bypassed.id, !(S.params.get(fx.bypassed.id) || fx.bypassed).value); });
+        bind(group, fx.bypassed, q => { b.textContent = q.value ? 'Off' : 'On'; b.classList.toggle('on', !q.value); card.classList.toggle('off', !!q.value); });
+        head.append(b);
+      }
+      const body = h('div', { class: 'fxbody' });
+      head.addEventListener('click', () => {
+        const now = !card.classList.contains('open');
+        card.classList.toggle('open', now); chev.textContent = now ? '▾' : '▸';
+        if (now) { S.fxOpen.add(fx.id); fillBody(); } else { S.fxOpen.delete(fx.id); }
+        store.set('fxOpen', [...S.fxOpen].slice(-50));
+        syncSubs();
+      });
+      let filled = false;
+      const fillBody = () => {
+        if (filled) return; filled = true;
+        for (const [name, p] of Object.entries(fx.params || {})) {
+          if (!p || typeof p.id !== 'number') continue;
+          const ctl = paramControl(name, p, group); if (ctl) body.append(ctl);
+        }
+      };
+      if (open) fillBody();
+      card.append(head, body);
+      container.append(card);
+    }
+  }
+
+  // ------------------------------------------------------------------ clip panel
+  // Follows the selected clip (selected in Arena, or the last clip triggered from here).
+  function findClip(id) {
+    const c = S.comp; if (!c || !id) return null;
+    for (let li = 0; li < c.layers.length; li++) {
+      const l = c.layers[li], ci = l.clips.findIndex(x => x.id === id);
+      if (ci >= 0) return { clip: l.clips[ci], layer: l, layerIndex: li + 1, colIndex: ci + 1 };
+    }
+    return null;
+  }
+  function selectedFromComp() {
+    const c = S.comp; if (!c) return null;
+    for (const l of c.layers) for (const x of l.clips) {
+      const p = x.selected && (S.params.get(x.selected.id) || x.selected);
+      if (p && p.value === true && x.connected && x.connected.value !== 'Empty') return x.id;
+    }
+    return null;
+  }
+  function setSelectedClip(id) {
+    if (!id || id === S.selClip) return;
+    S.selClip = id;
+    document.querySelectorAll('.clip.sel').forEach(t => t.classList.remove('sel'));
+    const t = document.querySelector(`.clip[data-id="${id}"]`); if (t) t.classList.add('sel');
+    renderClip(); syncSubsSoon();
+  }
+  // Every clip in the deck (not just the visible page) so selecting in Arena is always followed.
+  function watchSelection() {
+    S.binds.sel.clear();
+    const c = S.comp; if (!c) return;
+    for (const l of c.layers) for (const x of l.clips) {
+      if (!x.selected) continue;
+      bind('sel', x.selected, p => { if (p.value === true) setSelectedClip(x.id); });
+    }
+  }
+  const fmtTime = ms => { const t = Math.max(0, ms) / 1000, m = Math.floor(t / 60), sec = t - m * 60; return `${m}:${sec < 10 ? '0' : ''}${sec.toFixed(1)}`; };
+  function renderClip() {
+    S.binds.clip.clear();
+    const v = $('#clipView'); v.textContent = '';
+    const f = findClip(S.selClip);
+    if (!f) {
+      v.append(h('div', { class: 'empty-note' }, 'Trigger a clip, or select one in Arena, and its controls appear here.'));
+      return;
+    }
+    const { clip, layer, layerIndex, colIndex } = f;
+    const url = thumbUrl(clip);
+    const state = h('span', { class: 'cstate' });
+    const trig = h('button', { class: 'btn ctrig' }, 'Trigger');
+    holdButton(trig,
+      () => trigger(`/composition/clips/by-id/${clip.id}/connect`, true),
+      () => trigger(`/composition/clips/by-id/${clip.id}/connect`, false));
+    const clr = h('button', { class: 'btn' }, 'Clear layer');
+    clr.addEventListener('click', () => trigger(`/composition/layers/by-id/${layer.id}/clear`));
+    bind('clip', clip.connected, p => {
+      const live = p.value === 'Connected' || p.value === 'Connected & previewing';
+      state.textContent = live ? 'Playing' : p.value === 'Previewing' ? 'Previewing' : 'Stopped';
+      state.className = 'cstate' + (live ? ' live' : '');
+      trig.classList.toggle('on', live);
+    });
+    v.append(h('div', { class: 'chead' },
+      h('div', { class: 'cthumb' }, url ? h('img', { src: url, alt: '' }) : null),
+      h('div', { class: 'cinfo' },
+        h('div', { class: 'ctitle' }, (clip.name && clip.name.value) || 'Clip'),
+        h('div', { class: 'csub' }, `${pname(layer.name, layerIndex, 'Layer ' + layerIndex)} · Column ${colIndex}`),
+        state)));
+    v.append(h('div', { class: 'row cbtns' }, trig, clr));
+
+    const tr = clip.transport || {};
+    const sect = (title, ...kids) => { const el = h('div', { class: 'sect' }, h('h3', null, title), ...kids.filter(Boolean)); v.append(el); return el; };
+    if (tr.position) {
+      const dur = clip.video && clip.video.fileinfo && clip.video.fileinfo.duration_ms;
+      const isMs = dur && Math.abs((tr.position.max ?? 0) - dur) < 2;
+      const fmt = isMs ? (x => `${fmtTime(x)} / ${fmtTime(dur)}`) : undefined;
+      sect('Position (drag to scrub)', fader('clip', tr.position, fmt ? { format: fmt } : {}));
+    }
+    const ctl = tr.controls || {};
+    const ctlKids = Object.entries(ctl).map(([name, p]) => p && typeof p.id === 'number' ? paramControl(LABELS[name] || name, p, 'clip') : null);
+    if (ctlKids.some(Boolean)) sect('Transport', ...ctlKids);
+
+    const vid = clip.video || {};
+    const blend = vid.mixer && vid.mixer['Blend Mode'];
+    sect('Video',
+      vid.opacity ? paramControl('Opacity', vid.opacity, 'clip') : null,
+      blend ? paramControl('Blend mode', blend, 'clip') : null,
+      vid.resize ? paramControl('Resize', vid.resize, 'clip') : null);
+
+    sect('Trigger',
+      clip.transporttype ? paramControl('Transport type', clip.transporttype, 'clip') : null,
+      clip.triggerstyle ? paramControl('Trigger style', clip.triggerstyle, 'clip') : null,
+      clip.beatsnap ? paramControl('Beat snap', clip.beatsnap, 'clip') : null);
+
+    const effects = vid.effects || [];
+    const fxs = sect('Clip effects');
+    if (effects.length) effectCards(fxs, effects, 'clip');
+    else fxs.append(h('div', { class: 'empty-note' }, 'No effects on this clip.'));
+  }
+  const LABELS = { speed: 'Speed', playdirection: 'Direction', playmode: 'Play mode', playmodeaway: 'When re-triggered', duration: 'Duration (s)' };
+
   function renderFx() {
     S.binds.fx.clear();
     const v = $('#fxView'); v.textContent = '';
@@ -689,37 +862,7 @@
     v.append(chips);
     const effects = (cur.obj.video && cur.obj.video.effects) || [];
     if (!effects.length) { v.append(h('div', { class: 'empty-note' }, 'No video effects on ' + cur.label + '.')); return; }
-    for (const fx of effects) {
-      const open = S.fxOpen.has(fx.id);
-      const card = h('div', { class: 'fx' + (open ? ' open' : '') });
-      const chev = h('span', { class: 'chev' }, open ? '▾' : '▸');
-      const head = h('div', { class: 'fxhead' }, chev, h('span', { class: 'fxname' }, fx.display_name || fx.name));
-      if (fx.bypassed) {
-        const b = h('button', { class: 'btn sm' }, 'On');
-        b.addEventListener('click', e => { e.stopPropagation(); setParam(fx.bypassed.id, !(S.params.get(fx.bypassed.id) || fx.bypassed).value); });
-        bind('fx', fx.bypassed, q => { b.textContent = q.value ? 'Off' : 'On'; b.classList.toggle('on', !q.value); card.classList.toggle('off', !!q.value); });
-        head.append(b);
-      }
-      const body = h('div', { class: 'fxbody' });
-      head.addEventListener('click', () => {
-        const now = !card.classList.contains('open');
-        card.classList.toggle('open', now); chev.textContent = now ? '▾' : '▸';
-        if (now) { S.fxOpen.add(fx.id); fillBody(); } else { S.fxOpen.delete(fx.id); }
-        store.set('fxOpen', [...S.fxOpen].slice(-50));
-        syncSubs();
-      });
-      let filled = false;
-      const fillBody = () => {
-        if (filled) return; filled = true;
-        for (const [name, p] of Object.entries(fx.params || {})) {
-          if (!p || typeof p.id !== 'number') continue;
-          const ctl = paramControl(name, p); if (ctl) body.append(ctl);
-        }
-      };
-      if (open) fillBody();
-      card.append(head, body);
-      v.append(card);
-    }
+    effectCards(v, effects, 'fx');
   }
 
   // ------------------------------------------------------------------ chrome
@@ -730,14 +873,14 @@
   }
   function setView(v) {
     S.view = v; store.set('view', v);
-    document.body.classList.remove('view-clips', 'view-mixer', 'view-fx');
+    document.body.classList.remove('view-clips', 'view-mixer', 'view-fx', 'view-clip');
     document.body.classList.add('view-' + v);
     if (v !== 'clips') setPanel(v);
     document.querySelectorAll('#bottomNav .tab').forEach(b => b.classList.toggle('on', b.dataset.view === v));
   }
   function setPanel(p) {
     S.panel = p; store.set('panel', p);
-    document.body.classList.remove('panel-mixer', 'panel-fx');
+    document.body.classList.remove('panel-mixer', 'panel-fx', 'panel-clip');
     document.body.classList.add('panel-' + p);
     document.querySelectorAll('.sidetabs .tab').forEach(b => b.classList.toggle('on', b.dataset.panel === p));
   }
@@ -770,10 +913,33 @@
     else { const e = d.documentElement; (e.requestFullscreen || e.webkitRequestFullscreen || (() => { })).call(e); }
   });
   // keep the tablet awake while the app is open (only where the browser allows it)
-  let wakeLock = null;
-  const keepAwake = async () => { try { if ('wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } } catch { } };
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAwake(); });
-  document.addEventListener('pointerdown', keepAwake, { once: true });
+  // Keep the tablet awake. Browsers only grant the Wake Lock API on secure (https/localhost)
+  // pages, and the tablet opens this app over plain http on the LAN, so when the request is
+  // refused we fall back to a tiny muted looping video, which also stops phones sleeping.
+  let wakeLock = null, awakeVideo = null;
+  async function keepAwake() {
+    if (document.visibilityState !== 'visible') return;
+    try {
+      if (window.isSecureContext && 'wakeLock' in navigator) {
+        if (!wakeLock) {
+          wakeLock = await navigator.wakeLock.request('screen');
+          wakeLock.addEventListener('release', () => { wakeLock = null; });
+        }
+        return;
+      }
+    } catch { /* refused: use the video fallback */ }
+    if (!awakeVideo) {
+      awakeVideo = h('video', { muted: true, playsinline: true, 'webkit-playsinline': true, loop: true, 'aria-hidden': 'true',
+        style: 'position:fixed;width:1px;height:1px;opacity:0.01;left:0;bottom:0;pointer-events:none' },
+        h('source', { src: 'keepawake.mp4', type: 'video/mp4' }),
+        h('source', { src: 'keepawake.webm', type: 'video/webm' }));
+      awakeVideo.muted = true;
+      document.body.append(awakeVideo);
+    }
+    try { await awakeVideo.play(); } catch { /* needs a user gesture; retried on the next tap */ }
+  }
+  document.addEventListener('visibilitychange', keepAwake);
+  document.addEventListener('pointerdown', keepAwake);
 
   // A thumbnail can arrive before the lazy <img> exists; also refresh the whole state if the
   // tab was in the background (phones suspend websockets).
@@ -782,8 +948,8 @@
   });
 
   setTile(S.tile);
-  setPanel(S.panel === 'fx' ? 'fx' : 'mixer');
-  setView(['clips', 'mixer', 'fx'].includes(S.view) ? S.view : 'clips');
+  setPanel(['fx', 'clip'].includes(S.panel) ? S.panel : 'mixer');
+  setView(['clips', 'mixer', 'fx', 'clip'].includes(S.view) ? S.view : 'clips');
   setOnline(false);
   connect();
 })();

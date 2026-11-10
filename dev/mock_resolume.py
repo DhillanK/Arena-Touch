@@ -144,6 +144,22 @@ def http(conn, req):
         return Response(200, "OK", Headers({"Content-Type": "application/json"}), json.dumps(COMP).encode())
     if req.path == "/_log":
         return Response(200, "OK", Headers({"Content-Type": "application/json"}), json.dumps(LOG[-200:]).encode())
+    if req.path.startswith("/api/v1/composition/monitors"):
+        if req.path.rstrip("/") == "/api/v1/composition/monitors":
+            mons = [{"id": 1, "name": "Composition", "associated_object": None},
+                    {"id": 2, "name": "Preview", "associated_object": None}] + [
+                   {"id": 100 + i, "name": l["name"]["value"].replace("#", str(i + 1)),
+                    "associated_object": f"/composition/layers/by-id/{l['id']}"} for i, l in enumerate(LAYERS)]
+            return Response(200, "OK", Headers({"Content-Type": "application/json"}), json.dumps(mons).encode())
+        # snapshot: colour of the top-most playing clip, black when everything is faded out
+        colour = (0, 0, 0)
+        if COMP["master"]["value"] > 0:
+            for l in reversed(LAYERS):
+                live = [c for c in l["clips"] if c["connected"]["value"] == "Connected"]
+                if live and l["master"]["value"] > 0 and live[0]["id"] in thumbs:
+                    raw = zlib.decompress(thumbs[live[0]["id"]][41:-16])
+                    colour = tuple(int(x * l["master"]["value"]) for x in raw[1:4]); break
+        return Response(200, "OK", Headers({"Content-Type": "image/jpeg"}), png(colour))
     if "/thumbnail" in req.path:
         cid = int(req.path.split("/")[6])
         return Response(200, "OK", Headers({"Content-Type": "image/png"}), thumbs.get(cid, png((40, 40, 40))))

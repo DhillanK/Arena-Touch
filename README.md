@@ -14,6 +14,8 @@ Arena Touch talks directly to Resolume's built-in REST and WebSocket API, so it 
 - **Clip grid:** real thumbnails and live state (green means playing, amber means previewing). Arena colour labels show as a stripe on each clip, and playing clips show a progress bar for their loop. Column triggers, per-layer bypass, solo and clear, plus Clear all. **Lock** stops accidental triggers, and tile size is adjustable.
 - **Mixer:** composition master, A/B crossfader (double-tap to centre), and a strip for each layer and group: master fader, bypass, solo, crossfader A/B assignment, blend mode and clear. Faders move relative to your finger, so they never jump when touched.
 - **Effects:** every video effect on the composition, a group or a layer, each with an on/off toggle and all of its parameters (sliders, toggles, dropdowns, colours, hold buttons and steppers).
+- **Blackout:** one tap takes every layer, group and the composition to 0, so the wall goes black even when Advanced Output slices take their input from groups or layers. Clips keep playing. Tap **Restore** to bring back the exact levels. Every connected device shows the blackout.
+- **Output preview:** a live snapshot of the composition, Preview, busses or any single group or layer, refreshed about five times a second (needs a Resolume version with snapshot support).
 - **Tempo:** live BPM with a beat pulse and a four-dot bar counter, plus TAP, SYNC, ±1, /2 and ×2.
 - **Multi-device:** connect as many phones and tablets as you like. Everything stays in sync both ways, including with Arena and your MIDI controller.
 - **Responsive:** a side-by-side layout on tablets, and bottom tabs on phones.
@@ -96,12 +98,17 @@ start-windows.bat      Windows launcher
 start-mac.command      macOS launcher
 ```
 
+## Limitations
+
+Resolume's API covers the composition only. Outputs, screens, slices and Advanced Output presets can't be read or changed by any web app. Because slices take their input from layers and groups, you can still control what reaches each part of a screen by bypassing or fading the layer or group that feeds it.
+
 ## Roadmap
 
 - Clip-level effects and clip transport (speed, scrub)
 - Autopilot controls
 - Hiding layers and columns, and a performance mode (big tiles only)
 - Grid paging to match hardware controllers (e.g. APC Mini)
+- Per-slice-source "panel" buttons (e.g. blank the side screens only)
 
 Issues and pull requests are welcome.
 

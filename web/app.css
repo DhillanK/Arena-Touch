@@ -98,7 +98,7 @@ body.panel-mixer #mixerView, body.panel-fx #fxView { display: block; }
   #top { gap: 8px; padding: 6px 10px; padding-top: max(6px, env(safe-area-inset-top)); }
   .brand { flex: 1 1 0; }
   .tools { order: 0; }
-  .tools #fullscreen { display: none; }
+  .tools #fullscreen, .tools #zoomOut, .tools #zoomIn { display: none; }
   .tempo { order: 1; width: 100%; gap: 4px; }
   .tempo .btn { flex: 1 1 0; min-width: 0; padding: 0 4px; }
   .tempo .btn.tap { flex: 2 1 0; }
@@ -216,3 +216,19 @@ body.locked .clip, body.locked .colhead button { pointer-events: none; filter: s
 .banner { position: fixed; left: 50%; top: 12px; transform: translate(-50%, -150%); background: var(--danger); color: #fff;
   padding: 8px 16px; border-radius: 20px; font-weight: 700; transition: transform .25s; z-index: 50; pointer-events: none; }
 body.offline .banner { transform: translate(-50%, 0); }
+
+/* ---------- blackout ---------- */
+.btn.blackout { color: var(--danger); border-color: rgba(255,90,106,.5); }
+.btn.blackout.on { background: var(--danger); color: #fff; border-color: var(--danger); animation: boPulse 1.2s ease-in-out infinite; }
+@keyframes boPulse { 50% { background: #b3202f; } }
+body.is-black #top { box-shadow: inset 0 -3px 0 var(--danger); }
+
+/* ---------- output preview ---------- */
+.pvhead { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.pvhead h3 { margin: 0; flex: 1; }
+.pvsel { max-width: 150px; min-height: 32px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
+.pvlive.on { color: var(--live); border-color: var(--live); }
+.pvframe { position: relative; aspect-ratio: 16 / 9; background: #000; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.pvimg { width: 100%; height: 100%; object-fit: contain; display: block; }
+.pvnote { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 12px; color: var(--muted); font-size: 12px; }
+body.is-black .pvframe { border-color: var(--danger); }

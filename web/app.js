@@ -66,7 +66,7 @@
     let ws;
     try { ws = new WebSocket(url); } catch { return scheduleReconnect(); }
     S.ws = ws;
-    ws.onopen = () => { S.open = true; S.retry = 500; S.subs.clear(); setOnline(true); };
+    ws.onopen = () => { S.open = true; S.retry = 500; S.subs.clear(); setOnline(true); Preview.start(); };
     ws.onclose = () => { if (S.ws === ws) { S.open = false; setOnline(false); scheduleReconnect(); } };
     ws.onerror = () => { try { ws.close(); } catch { } };
     ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } onMessage(m); };
@@ -173,6 +173,51 @@
       beatSetBpm(p.value);
     });
     bind('top', tc.play_state, p => { B.playing = p.value === undefined || p.value === 'Play'; });
+    for (const t of blackoutTargets()) bind('top', t.param, refreshBlackout);
+  }
+
+  // ---- blackout. Zeroes the master of every layer, every group and the composition, so the wall
+  // goes black whatever Advanced Output slices use as their input (a slice fed by a group or layer
+  // skips the composition master). Clips keep playing. Tapping again restores the previous levels.
+  const BO_KEY = 'blackout';
+  function blackoutTargets() {
+    const c = S.comp; if (!c) return [];
+    const t = [];
+    for (const l of c.layers || []) if (l.master) t.push({ key: 'l' + l.id, param: l.master, layer: true });
+    for (const g of c.layergroups || []) if (g.master) t.push({ key: 'g' + g.id, param: g.master });
+    if (c.master) t.push({ key: 'comp', param: c.master });
+    return t;
+  }
+  const valueOf = p => { const q = S.params.get(p.id) || p; return typeof q.value === 'number' ? q.value : 0; };
+  function isBlack() {
+    const layers = blackoutTargets().filter(t => t.layer);
+    return layers.length > 0 && layers.every(t => valueOf(t.param) < 0.001);
+  }
+  function refreshBlackout() {
+    const on = isBlack();
+    const b = $('#blackout');
+    b.classList.toggle('on', on);
+    b.textContent = on ? 'Restore' : 'Blackout';
+    document.body.classList.toggle('is-black', on);
+  }
+  function toggleBlackout() {
+    const targets = blackoutTargets(); if (!targets.length) return;
+    if (!isBlack()) {
+      const saved = {};
+      for (const t of targets) { saved[t.key] = valueOf(t.param); setParam(t.param.id, 0); }
+      store.set(BO_KEY, saved);
+    } else {
+      // Levels saved on this device are restored exactly; if blackout was started on another
+      // tablet (or before a reload of Arena) anything we don't know comes back at full.
+      const saved = store.get(BO_KEY, {}) || {};
+      for (const t of targets) {
+        if (valueOf(t.param) >= 0.001) continue; // someone already brought this one back up
+        const v = saved[t.key];
+        setParam(t.param.id, typeof v === 'number' && v > 0 ? v : 1);
+      }
+      store.set(BO_KEY, null);
+    }
+    refreshBlackout();
   }
 
   // ---- beat pulse. Resolume's API exposes BPM but not the beat position, so the pulse runs on a
@@ -300,7 +345,13 @@
     document.documentElement.style.setProperty('--tile', S.tile + 'px');
 
     const clearAll = h('button', { class: 'btn' }, 'Clear all');
-    clearAll.addEventListener('click', () => c.layers.forEach(l => trigger(`/composition/layers/by-id/${l.id}/clear`)));
+    clearAll.addEventListener('click', async () => {
+      try {
+        const r = await fetch('/api/v1/composition/disconnect-all', { method: 'POST' });
+        if (r.ok) return;
+      } catch { /* fall back below */ }
+      c.layers.forEach(l => trigger(`/composition/layers/by-id/${l.id}/clear`));
+    });
     grid.append(h('div', { class: 'corner' }, clearAll));
 
     cols.forEach((col, i) => {
@@ -465,6 +516,7 @@
     S.binds.mixer.clear();
     const v = $('#mixerView'); v.textContent = '';
     const c = S.comp; if (!c) return;
+    v.append(Preview.build());
     const top = h('div', { class: 'sect' }, h('h3', null, 'Composition master'));
     if (c.master) top.append(fader('mixer', c.master, { jump: false }));
     v.append(top);
@@ -482,6 +534,79 @@
     }
     v.append(h('div', { class: 'sect' }, h('h3', null, 'Layers'), strips));
   }
+
+  // ------------------------------------------------------------------ output preview
+  // Resolume can return a JPEG snapshot of any render target (composition, preview, busses,
+  // groups, layers). Fetching one after another gives a live-ish preview of what's going out.
+  const Preview = {
+    live: store.get('previewLive', true),
+    target: store.get('previewTarget', 'Composition'),
+    fps: 5,
+    img: null, note: null, select: null, running: false, url: null, monitors: [],
+    build() {
+      const sel = h('select', { class: 'pvsel' });
+      const btn = h('button', { class: 'btn sm pvlive' });
+      const img = h('img', { class: 'pvimg', alt: '' });
+      const note = h('div', { class: 'pvnote' }, 'Loading preview…');
+      sel.addEventListener('change', () => { this.target = sel.value; store.set('previewTarget', sel.value); });
+      btn.addEventListener('click', () => { this.live = !this.live; store.set('previewLive', this.live); this.paint(); this.start(); });
+      Object.assign(this, { img, note, select: sel, btn });
+      if (this.url) img.src = this.url;
+      this.paint(); this.loadMonitors(); this.start();
+      return h('div', { class: 'sect preview' },
+        h('div', { class: 'pvhead' }, h('h3', null, 'Output preview'), sel, btn),
+        h('div', { class: 'pvframe' }, img, note));
+    },
+    paint() {
+      if (!this.btn) return;
+      this.btn.textContent = this.live ? 'Live' : 'Paused';
+      this.btn.classList.toggle('on', this.live);
+    },
+    async loadMonitors() {
+      try {
+        const r = await fetch('/api/v1/composition/monitors', { cache: 'no-store' });
+        if (!r.ok) throw new Error(r.status);
+        this.monitors = await r.json();
+      } catch {
+        this.monitors = [];
+        this.note.textContent = 'Preview needs a newer Resolume version (no snapshot support).';
+        this.note.style.display = 'flex';
+        return;
+      }
+      const sel = this.select; sel.textContent = '';
+      for (const m of this.monitors) sel.append(h('option', { value: m.name }, m.name));
+      if (!this.monitors.some(m => m.name === this.target)) this.target = (this.monitors[0] || {}).name;
+      sel.value = this.target;
+    },
+    visible() { return this.img && this.img.isConnected && this.img.offsetParent !== null && document.visibilityState === 'visible'; },
+    start() {
+      if (this.running) return;
+      this.running = true;
+      const loop = async () => {
+        while (this.live && S.open) {
+          const m = this.monitors.find(x => x.name === this.target);
+          if (!m || !this.visible()) { await new Promise(r => setTimeout(r, 400)); continue; }
+          const t0 = performance.now();
+          try {
+            const r = await fetch(`/api/v1/composition/monitors/${m.id}/snapshot.jpg?t=${Date.now()}`, { cache: 'no-store' });
+            if (!r.ok) throw new Error(r.status);
+            const url = URL.createObjectURL(await r.blob());
+            const old = this.url; this.url = url;
+            this.img.src = url; this.note.style.display = 'none';
+            if (old) setTimeout(() => URL.revokeObjectURL(old), 1000);
+          } catch {
+            this.note.textContent = 'Preview unavailable'; this.note.style.display = 'flex';
+            await new Promise(r => setTimeout(r, 1500));
+          }
+          const wait = 1000 / this.fps - (performance.now() - t0);
+          if (wait > 0) await new Promise(r => setTimeout(r, wait));
+        }
+        this.running = false;
+      };
+      loop();
+    },
+  };
+  document.addEventListener('visibilitychange', () => Preview.start());
 
   // ------------------------------------------------------------------ effects
   function fxTargets() {
@@ -632,6 +757,7 @@
   });
   $('#zoomIn').addEventListener('click', () => setTile(S.tile + 20));
   $('#zoomOut').addEventListener('click', () => setTile(S.tile - 20));
+  $('#blackout').addEventListener('click', toggleBlackout);
   $('#lock').addEventListener('click', () => {
     S.locked = !S.locked;
     document.body.classList.toggle('locked', S.locked);
